@@ -1,170 +1,294 @@
-using System.Data.Common;
-using System.Security.Claims;
-using System.Security.Cryptography;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-
-var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme).AddCookie();
-builder.Services.AddAuthorization();
-
-var app = builder.Build();
-
-app.UseAuthentication();
-app.UseAuthorization();
-
-CSWebAdapter csWeb = new CSWebAdapter();
-
-DBManager db = new DBManager();
-
-app.MapGet("/", () => "please, enter array");
-
-app.MapPost("/login", async (string login, string password, HttpContext context) => 
+﻿using System;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Threading.Tasks;
+class Program
 {
-    if (!db.CheckUser(login, password))
-        return Results.Unauthorized();
-
-    var claims = new List<Claim> {new Claim(ClaimTypes.Name, login) };
-    var claimsIdentity = new ClaimsIdentity(claims, "Cookies");
-    await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(claimsIdentity));
-    return Results.Ok();    
-});
-
-app.MapPost("/signup", (string login, string password) => 
-{
-    if (db.AddUser(login, password))
-        return Results.Ok("Пользователь " + login + " успешно зарегистрирован!");
-    else
-        return Results.Problem("Ошибка решистрации пользователя: " + login);
-});
-
-app.MapPost("/get_array", [Authorize]([FromBody] string strArray) => csWeb.ConvertArrayToValues(strArray));
-
-app.MapPost("/array_sorting", [Authorize] () => csWeb.CombSort());
-
-app.MapGet("/get_random_array", [Authorize] ([FromQuery] int n) => csWeb.GetRandomArray(n));
-
-app.MapGet("/get_array_part", [Authorize] ([FromQuery] int start, [FromQuery] int end) => csWeb.GetArrayPartByBoarders(start, end));
-
-app.MapPost("/delete_array", [Authorize] () => csWeb.DeleteArray());
-
-app.MapGet("/current_user", [Authorize] (HttpContext context) => {
-    if (context.User.Identity == null)
-        return Results.BadRequest("Нет имени пользователя");
-    return Results.Ok(context.User.Identity.Name);
-});
-
-
-const string DB_PATH = "/home/alexey/ComSorting.Users.db";
-if (!db.ConnectToDB(DB_PATH))
-{
-    Console.WriteLine("Ошибка подключения к базе данных " + DB_PATH);
-    Console.WriteLine("Выключение!");
-    return;
-}
-
-app.Run();
-db.Disconnect();
-
-public class CSWebAdapter()
-{
-    private CombSorting cs = new CombSorting();
-
-    public string DeleteArray() 
-    { return cs.DeleteArray(); }
-
-    public int[] ConvertArrayToValues(string strArray) 
-    { return cs.ConvertArrayToValues(strArray); }
-
-    public int[] CombSort() 
-    { return cs.CombSort(); }
-
-    public int[] GetRandomArray(int n) 
-    { return cs.GetRandomArray(n); }
-
-    public int[] GetArrayPartByBoarders(int start, int end) 
-    { return cs.GetArrayPartByBoarders(start, end); } 
-} 
-public class CombSorting
-{
-    private int[]? userArray; 
-
-    public string DeleteArray() 
-    { userArray = null; return "Массив удален успешно"; }
-    
-    public int[] GetArrayPartByBoarders(int start, int end) 
+    private static HttpClient client = new HttpClient();
+    private const string BaseUrl = "http://localhost:5000";
+    static async Task Main(string[] args)
     {
-        int[] result = new int[end - start + 1];
-        Array.Copy(userArray, start, result, 0, end - start + 1);
-        return result;
-    }
+        client.BaseAddress = new Uri(BaseUrl);
+        client.DefaultRequestHeaders.Accept.Clear();
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-    public int[] GetRandomArray(int n) 
-    {
-        Random random = new Random(); 
-        userArray = new int[n]; 
+        bool isRunning = true;
 
-        for (int i = 0; i < n; i++)
-        { userArray[i] = random.Next(-1000, 1000); }
-
-        return userArray;
-    }
-    public int[] ConvertArrayToValues(string strArray) 
-    {
-    string[] arrayItems = strArray.Split(',');
-
-    if (arrayItems.Length == 0 || arrayItems.All(string.IsNullOrWhiteSpace)) 
-    { throw new ArgumentException("Входная строка не содержит данных."); }
-
-    int[] arrayNumbers = new int[arrayItems.Length];
-
-    for (int i = 0; i < arrayItems.Length; i++)
-    { arrayNumbers[i] = int.Parse(arrayItems[i]);}// вспомогательный метод для сортировки
-
-    userArray = arrayNumbers; 
-
-    return arrayNumbers; 
-    }
-
-    public int[] CombSort() 
-    {
-        if (userArray == null || userArray.Length == 0)
-        { throw new InvalidOperationException("Массив не инициализирован или пуст.\n\n"); }
-
-        int[] array = new int[userArray.Length];
-        Array.Copy(userArray, array, userArray.Length);
-        double gap = array.Length;
-        bool swapped = true;
-        while (gap > 1 || swapped)
+        while (isRunning)
         {
-            gap /= 1.247;
-            if (gap < 1) gap = 1;
-            int i = 0;
-            swapped = false;
-            while (i + gap < array.Length)
+            Console.Clear();
+            Console.WriteLine("Выберите действие:");
+            Console.WriteLine("1. Регистрация");
+            Console.WriteLine("2. Авторизация");
+            Console.WriteLine("3. Выход");
+            string? choice = Console.ReadLine();
+
+            switch (choice)
             {
-                int j = i + (int)gap;
-                if (array[i] > array[(int)(i + gap)])
-                {
-                    Swap(ref array[i], ref array[(int)(i + gap)]);
-                    swapped = true;
-                }
-                i++;
+                case "1":
+                    await HandleSignUp();
+                    break;
+
+                case "2":
+                    await HandleLogin();
+                    break;
+
+                case "3":
+                    isRunning = false;
+                    break;
+
+                default:
+                    Console.WriteLine("Некорректный выбор. Попробуйте снова.");
+                    break;
             }
-        } 
-        userArray = array; 
-        
-        return array;
+        }
     }
 
-    static void Swap(ref int a, ref int b) 
+    static async Task HandleSignUp()
     {
-        int temp = a;
-        a = b;
-        b = temp;
+        Console.Write("Введите логин: ");
+        string? login = Console.ReadLine();
+        Console.Write("Введите пароль: ");
+        string? password = Console.ReadLine();
+
+        if (string.IsNullOrEmpty(login) || string.IsNullOrEmpty(password))
+        { Console.WriteLine("Логин и пароль не могут быть пустыми."); return; }
+
+        try
+        {
+            var response = await client.PostAsync($"/signup?login={Uri.EscapeDataString(login)}&password={Uri.EscapeDataString(password)}", null);
+
+            if (response.IsSuccessStatusCode)
+            { Console.WriteLine("Пользователь успешно зарегистрирован."); }
+            else if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+            { Console.WriteLine("Пользователь с таким логином уже существует.");  }
+            else
+            { Console.WriteLine("Ошибка регистрации: " + response.StatusCode); }
+        }
+        catch (HttpRequestException)
+        { Console.WriteLine("Сервер недоступен"); }
     }
+
+    static async Task HandleLogin()
+    {
+        Console.Write("Введите логин: ");
+        string? login = Console.ReadLine();
+        Console.Write("Введите пароль: ");
+        string? password = Console.ReadLine();
+
+        if (string.IsNullOrEmpty(login) || string.IsNullOrEmpty(password))
+        { Console.WriteLine("Логин и пароль не могут быть пустыми."); return; }
+        try
+        {
+            var response = await client.PostAsync($"/login?login={Uri.EscapeDataString(login)}&password={Uri.EscapeDataString(password)}", null);
+
+            if (response.IsSuccessStatusCode)
+            {
+                Console.WriteLine("Авторизация прошла успешно.");
+                await HandleArrayOperations();
+            }
+            else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            { Console.WriteLine("Неверный логин или пароль."); }
+            else
+            { Console.WriteLine("Ошибка авторизации: " + response.StatusCode); }
+        }
+        catch (HttpRequestException)
+        { Console.WriteLine("Сервер недоступен. Проверьте подключение к интернету."); }
+    }
+
+    static async Task HandleArrayOperations()
+    {
+        bool isRunning = true;
+        while (isRunning)
+        {
+            Console.Clear();
+            Console.WriteLine("Выберите действие с массивом:");
+            Console.WriteLine("1. Преобразовать строку в массив");
+            Console.WriteLine("2. Отсортировать массив");
+            Console.WriteLine("3. Получить случайный массив");
+            Console.WriteLine("4. Получить часть массива");
+            Console.WriteLine("5. Удалить массив");
+            Console.WriteLine("6. Получить текущего пользователя");
+            Console.WriteLine("7. Выйти");
+            string? choice = Console.ReadLine();
+
+            switch (choice)
+            {
+                case "1":
+                    await ConvertArrayToValues();
+                    break;
+
+                case "2":
+                    await CombSort();
+                    break;
+
+                case "3":
+                    await GetRandomArray();
+                    break;
+
+                case "4":
+                    await GetArrayPartByBoarders();
+                    break;
+
+                case "5":
+                    await DeleteArray();
+                    break;
+
+                case "6":
+                    await GetCurrentUser();
+                    break;
+
+                case "7":
+                    isRunning = false;
+                    break;
+
+                default:
+                    Console.WriteLine("Некорректный выбор. Попробуйте снова.");
+                    break;
+            }
+        }
+    }
+
+    static async Task ConvertArrayToValues()
+    {
+        Console.Write("Введите массив чисел через запятую: ");
+        string? strArray = Console.ReadLine();
+
+        if (string.IsNullOrEmpty(strArray))
+        { Console.WriteLine("Ввод не может быть пустым."); return; }
+
+        try
+        {
+            var content = new StringContent($"\"{strArray}\"", Encoding.UTF8, "application/json");
+            var response = await client.PostAsync("/get_array", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadAsStringAsync();
+                Console.WriteLine("Преобразованный массив: " + result);
+            }
+            else
+            { Console.WriteLine("Ошибка: " + response.StatusCode); }
+        }
+        catch (HttpRequestException)
+        { Console.WriteLine("Сервер недоступен"); }
+    }
+    static async Task CombSort()
+    {
+        try
+        {
+            var response = await client.PostAsync("/array_sorting", null);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadAsStringAsync();
+                Console.WriteLine("Отсортированный массив: " + result);
+            }
+            else if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                var errorMessage = await response.Content.ReadAsStringAsync();
+                Console.WriteLine("Ошибка: " + errorMessage);
+            }
+            else
+            { Console.WriteLine("Ошибка: " + response.StatusCode); }
+        }
+        catch (HttpRequestException)
+        { Console.WriteLine("Сервер недоступен"); }
+    }
+    static async Task GetRandomArray()
+    {
+        Console.Write("Введите размер массива: ");
+        if (!int.TryParse(Console.ReadLine(), out int n) || n <= 0)
+        { Console.WriteLine("Некорректный размер массива. Введите положительное число."); return; }
+
+        try
+        {
+            var response = await client.GetAsync($"/get_random_array?n={n}");
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadAsStringAsync();
+                Console.WriteLine("Случайный массив: " + result);
+            }
+            else
+            { Console.WriteLine("Ошибка: " + response.StatusCode); }
+        }
+        catch (HttpRequestException)
+        { Console.WriteLine("Сервер недоступен"); }
+    }
+
+static async Task GetArrayPartByBoarders()
+{
+    Console.Write("Введите начальный индекс: ");
+    if (!int.TryParse(Console.ReadLine(), out int start))
+    { Console.WriteLine("Некорректный начальный индекс. Введите целое число."); return; }
+
+    Console.Write("Введите конечный индекс: ");
+    if (!int.TryParse(Console.ReadLine(), out int end))
+    { Console.WriteLine("Некорректный конечный индекс. Введите целое число."); return; }
+
+    if (start < 0)
+    { Console.WriteLine("Ошибка: Начальный индекс не может быть меньше нуля."); return; }
+
+    if (start > end)
+    {Console.WriteLine("Ошибка: Начальный индекс не может быть больше конечного."); return; }
+
+    try
+    {
+        var response = await client.GetAsync($"/get_array_part?start={start}&end={end}");
+
+        if (response.IsSuccessStatusCode)
+        {
+            var result = await response.Content.ReadAsStringAsync();
+            Console.WriteLine("Часть массива: " + result);
+        }
+        else if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+        {
+            
+            var errorMessage = await response.Content.ReadAsStringAsync();
+            Console.WriteLine("Ошибка: " + errorMessage);
+        }
+        else
+        { Console.WriteLine("Ошибка: " + response.StatusCode); }
+    }
+    catch (HttpRequestException)
+    { Console.WriteLine("Сервер недоступен"); }
 }
 
+    static async Task DeleteArray()
+    {
+        try
+        {
+            var response = await client.PostAsync("/delete_array", null);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadAsStringAsync();
+                Console.WriteLine(result);
+            }
+            else
+            { Console.WriteLine("Ошибка: " + response.StatusCode); }
+        }
+        catch (HttpRequestException)
+        { Console.WriteLine("Сервер недоступен"); }
+    }
+
+    static async Task GetCurrentUser()
+    {
+        try
+        {
+            var response = await client.GetAsync("/current_user");
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadAsStringAsync();
+                Console.WriteLine("Текущий пользователь: " + result);
+            }
+            else
+            { Console.WriteLine("Ошибка: " + response.StatusCode); }
+        }
+        catch (HttpRequestException)
+        { Console.WriteLine("Сервер недоступен"); }
+    }
+}
